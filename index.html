@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Compteur Vélo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="description" content="GPS bike speedometer: current, average and max speed, distance and trip reset.">
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vélo">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap">
+<style>
+:root{--fg:#ffb800;--hi:#ffd60a;--or:#ff7a00;--mut:#b98a2c;--line:rgba(255,184,0,.35);
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px);background:#131313}
+*{box-sizing:border-box}
+body{margin:0;color:var(--fg);font-family:Orbitron,"Segoe UI",system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;padding:16px;gap:12px;max-width:520px;margin-inline:auto;
+background-color:#131313;background-size:20px 20px;
+background-image:linear-gradient(27deg,#151515 5px,transparent 5px),linear-gradient(207deg,#151515 5px,transparent 5px),linear-gradient(27deg,#222 5px,transparent 5px),linear-gradient(207deg,#222 5px,transparent 5px),linear-gradient(90deg,#1b1b1b 10px,transparent 10px),linear-gradient(#1d1d1d 25%,#1a1a1a 25%,#1a1a1a 50%,transparent 50%,transparent 75%,#242424 75%,#242424);
+background-position:0 5px,10px 0,0 10px,10px 5px,0 0,0 0;background-attachment:fixed}
+h1{font-size:.85rem;margin:0;color:var(--hi);font-weight:700;letter-spacing:.15em;display:flex;justify-content:space-between;align-items:center;text-transform:uppercase}
+#gps{font-size:.65rem;color:var(--mut);letter-spacing:.05em}
+.hero,.card{background:linear-gradient(160deg,rgba(0,0,0,.78),rgba(10,10,10,.92));border:1px solid var(--line);border-radius:18px;box-shadow:inset 0 0 18px rgba(255,140,0,.08),0 6px 20px rgba(0,0,0,.6)}
+.hero{padding:22px 16px 16px;text-align:center;border-color:rgba(255,184,0,.6)}
+.hero .v{font-size:5.4rem;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;color:var(--hi);text-shadow:0 0 18px rgba(255,190,0,.55)}
+.bar{height:10px;border-radius:6px;margin-top:14px;background:#1a1a1a;border:1px solid var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ffd60a,#ff9d00 65%,#ff3b00);box-shadow:0 0 10px var(--or);transition:width .4s}
+.lbl{font-size:.6rem;color:var(--mut);text-transform:uppercase;letter-spacing:.14em;margin-top:8px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{padding:14px 10px;text-align:center}
+.card .v{font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;color:var(--fg);text-shadow:0 0 10px rgba(255,150,0,.4)}
+.card small{font-size:.6rem;color:var(--or)}
+.btns{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-top:auto}
+button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-transform:uppercase;border-radius:14px;padding:18px;cursor:pointer}
+#go{background:linear-gradient(180deg,#ffd60a,#ff9d00);color:#111;border:0;box-shadow:0 0 16px rgba(255,170,0,.45)}
+#go.on{background:linear-gradient(180deg,#ff9d00,#ff5a00)}
+#rst{background:rgba(0,0,0,.7);color:#ff4d2e;border:1px solid #ff4d2e}
+#gpsBtn{display:block;background:rgba(0,0,0,.75);color:var(--hi);border:1px solid var(--hi);padding:14px;font-size:.8rem}
+#msg{font-size:.65rem;color:var(--mut);text-align:center;min-height:1em;letter-spacing:.05em}
+</style>
+</head>
+<body>
+<h1><span>🚴 Compteur Vélo</span><span id="gps">GPS : inactif</span></h1>
+<button id="gpsBtn">📍 Activer le GPS</button>
+<div class="hero"><div class="v" id="cur">0.0</div><div class="lbl">km/h · vitesse actuelle</div><div class="bar"><i id="bar"></i></div></div>
+<div class="grid">
+  <div class="card"><div class="v" id="avg">0.0</div><div class="lbl">Vitesse moy. <small>km/h</small></div></div>
+  <div class="card"><div class="v" id="max">0.0</div><div class="lbl">Vitesse max <small>km/h</small></div></div>
+  <div class="card"><div class="v" id="dist">0.00</div><div class="lbl">Distance <small>km</small></div></div>
+  <div class="card"><div class="v" id="mov">00:00</div><div class="lbl">Temps en mouvement</div></div>
+</div>
+<div class="card"><div class="v" id="ela">00:00:00</div><div class="lbl">Durée totale du trajet</div></div>
+<div id="msg">Appuyez sur Démarrer et gardez l'écran allumé.</div>
+<div class="btns"><button id="go">▶ Démarrer</button><button id="rst">Reset</button></div>
+
+<script>
+const KEY='compteur-velo-v1';
+let S={dist:0,max:0,moving:0,elapsed:0};
+let running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
+const $=id=>document.getElementById(id);
+
+try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r));}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
+
+const pad=n=>String(Math.floor(n)).padStart(2,'0');
+const fmt=s=>s>=3600?`${pad(s/3600)}:${pad(s%3600/60)}:${pad(s%60)}`:`${pad(s/60)}:${pad(s%60)}`;
+const fmtFull=s=>`${pad(s/3600)}:${pad(s%3600/60)}:${pad(s%60)}`;
+
+function render(){
+  const kmh=v=>(v*3.6).toFixed(1);
+  const cv=Date.now()-lastFix>6000?0:curV*3.6;
+  $('cur').textContent=cv.toFixed(1);
+  $('bar').style.width=Math.min(100,cv/50*100)+'%';
+  $('avg').textContent=S.moving>0?kmh(S.dist/S.moving):'0.0';
+  $('max').textContent=kmh(S.max);
+  $('dist').textContent=(S.dist/1000).toFixed(2);
+  $('mov').textContent=fmt(S.moving);
+  $('ela').textContent=fmtFull(S.elapsed);
+}
+
+function haversine(a,b){
+  const R=6371000,t=x=>x*Math.PI/180;
+  const dLat=t(b.latitude-a.latitude),dLon=t(b.longitude-a.longitude);
+  const h=Math.sin(dLat/2)**2+Math.cos(t(a.latitude))*Math.cos(t(b.latitude))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+function onPos(p){
+  const c=p.coords,t=p.timestamp;
+  $('gpsBtn').style.display='none';
+  $('gps').textContent='GPS : '+(c.accuracy<=15?'🟢':c.accuracy<=30?'🟠':'🔴')+' ±'+Math.round(c.accuracy)+' m';
+  if(!running||c.accuracy>30)return;
+  lastFix=Date.now();
+  if(last){
+    const dt=(t-last.t)/1000;
+    if(dt>0){
+      const d=haversine(last.c,c);
+      let v=(c.speed!=null&&!isNaN(c.speed))?c.speed:d/dt;
+      curV=v;
+      if(v*3.6>=2&&v<35){           // en mouvement (évite la dérive GPS à l'arrêt)
+        S.dist+=d;S.moving+=dt;
+        if(v>S.max)S.max=v;
+      } else if(v*3.6<2){curV=0;}
+      save();
+    }
+  }
+  last={c:{latitude:c.latitude,longitude:c.longitude},t};
+  render();
+}
+function onErr(e){
+  $('gpsBtn').style.display='block';
+  $('gps').textContent='GPS : 🔴 désactivé';
+  $('msg').textContent=e.code===1
+   ?'⚠️ Localisation refusée. Autorisez-la dans les réglages du navigateur (Firefox/Chrome : cadenas › Autorisations › Localisation ; Safari : Réglages › Confidentialité › Service de localisation). Si aucune demande ne s\'affiche, la page est probablement bloquée car intégrée : ouvrez-la depuis sa propre adresse web., puis appuyez sur « Activer le GPS ».'
+   :e.code===2?'⚠️ Position indisponible : sortez à l\'extérieur ou activez la localisation du téléphone.'
+   :'⚠️ Délai dépassé, réessayez.';
+}
+function enableGps(){
+  if(!window.isSecureContext){
+    $('gpsBtn').style.display='block';
+    $('gps').textContent='GPS : bloqué';
+    $('msg').textContent='⚠️ Page non sécurisée ('+location.protocol+'). Le GPS ne fonctionne que sur une adresse https:// : hébergez ce fichier (Netlify Drop ou GitHub Pages), ne l\'ouvrez pas depuis le téléphone.';
+    return;
+  }
+  if(!navigator.geolocation){onErr({code:2});$('msg').textContent='⚠️ GPS non supporté par ce navigateur.';return;}
+  if(window.self!==window.top)$('msg').textContent='Si rien ne se passe, ouvrez ce lien directement dans Safari/Chrome (pas dans une fenêtre intégrée).';
+  $('gps').textContent='GPS : recherche…';
+  setTimeout(()=>{if($('gps').textContent==='GPS : recherche…')onErr({code:3});},22000);
+  navigator.geolocation.getCurrentPosition(p=>{onPos(p);$('msg').textContent='GPS prêt. Appuyez sur Démarrer.';},onErr,{enableHighAccuracy:true,timeout:20000,maximumAge:0});
+}
+$('gpsBtn').onclick=enableGps;
+$('gps').onclick=enableGps;
+if(navigator.permissions&&navigator.permissions.query){
+  navigator.permissions.query({name:'geolocation'}).then(r=>{
+    if(r.state==='granted')enableGps();else $('gpsBtn').style.display='block';
+    r.onchange=()=>{if(r.state==='granted')enableGps();};
+  }).catch(()=>{$('gpsBtn').style.display='block';});
+}else{$('gpsBtn').style.display='block';}
+
+async function lockScreen(){try{if(navigator.wakeLock)wake=await navigator.wakeLock.request('screen');}catch(e){}}
+function unlockScreen(){try{wake&&wake.release();}catch(e){}wake=null;}
+document.addEventListener('visibilitychange',()=>{if(running&&document.visibilityState==='visible')lockScreen();});
+
+function start(){
+  if(!navigator.geolocation){$('msg').textContent='GPS non supporté.';return;}
+  running=true;last=null;lastTick=Date.now();
+  watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+  lockScreen();
+  $('go').textContent='⏸ Pause';$('go').classList.add('on');
+  $('msg').textContent='Enregistrement en cours… gardez l\'écran allumé.';
+}
+function pause(){
+  running=false;
+  if(watchId!=null)navigator.geolocation.clearWatch(watchId);watchId=null;
+  unlockScreen();curV=0;last=null;save();
+  $('go').textContent='▶ Reprendre';$('go').classList.remove('on');
+  $('msg').textContent='En pause.';render();
+}
+$('go').onclick=()=>running?pause():start();
+
+$('rst').onclick=()=>{
+  if(!rstTimer){
+    $('rst').textContent='Confirmer ?';
+    rstTimer=setTimeout(()=>{rstTimer=null;$('rst').textContent='Reset';},3000);
+    return;
+  }
+  clearTimeout(rstTimer);rstTimer=null;$('rst').textContent='Reset';
+  if(running)pause();
+  S={dist:0,max:0,moving:0,elapsed:0};curV=0;last=null;save();
+  $('go').textContent='▶ Démarrer';
+  $('msg').textContent='Nouveau trajet prêt.';render();
+};
+
+setInterval(()=>{
+  if(running){const n=Date.now();S.elapsed+=(n-lastTick)/1000;lastTick=n;
+    if(Math.floor(S.elapsed)%10===0)save();}
+  render();
+},1000);
+
+if(!window.isSecureContext)enableGps();
+if(S.elapsed>0||S.dist>0)$('go').textContent='▶ Reprendre';
+render();
+
+if('serviceWorker' in navigator&&window.isSecureContext){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
