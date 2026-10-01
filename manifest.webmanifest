@@ -1,6 +1,6 @@
 {
   "name": "Bike Speedometer",
-  "short_name": "Vélo",
+  "short_name": "Bike Speed",
   "description": "GPS bike computer: current, average and max speed, distance, trip reset.",
   "lang": "fr",
   "start_url": "./index.html",
