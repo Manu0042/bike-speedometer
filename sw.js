@@ -1,6 +1,6 @@
 // Service worker : fonctionnement hors-ligne de l'application
 // Incrémentez CACHE à chaque modification des fichiers pour forcer la mise à jour.
-const CACHE = 'bike-speedometer-v3';
+const CACHE = 'bike-speedometer-v4';
 const SHELL = [
   './',
   './index.html',

@@ -60,7 +60,7 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 <script>
 const KEY='compteur-velo-v1';
 let S={dist:0,max:0,moving:0,elapsed:0};
-let running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
+let lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
 const $=id=>document.getElementById(id);
 
 try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r));}catch(e){}
@@ -75,10 +75,15 @@ function render(){
   const cv=Date.now()-lastFix>6000?0:curV*3.6;
   $('cur').textContent=cv.toFixed(1);
   $('bar').style.width=Math.min(100,cv/50*100)+'%';
-  $('avg').textContent=S.moving>0?kmh(S.dist/S.moving):'0.0';
-  $('max').textContent=kmh(S.max);
-  $('dist').textContent=(S.dist/1000).toFixed(2);
-  $('mov').textContent=fmt(S.moving);
+  // entre deux positions GPS, on prolonge le calcul avec la vitesse actuelle
+  const age=(Date.now()-lastFix)/1000;
+  const live=running&&curV*3.6>=2&&age>0&&age<=3;
+  const dT=live?age:0,dD=live?curV*age:0;
+  const mv=S.moving+dT,ds=S.dist+dD;
+  $('avg').textContent=mv>0?kmh(ds/mv):'0.0';
+  $('max').textContent=kmh(Math.max(S.max,live?curV:0));
+  $('dist').textContent=(ds/1000).toFixed(2);
+  $('mov').textContent=fmt(mv);
   $('ela').textContent=fmtFull(S.elapsed);
 }
 
@@ -92,8 +97,11 @@ function haversine(a,b){
 function onPos(p){
   const c=p.coords,t=p.timestamp;
   $('gpsBtn').style.display='none';
-  $('gps').textContent='GPS : '+(c.accuracy<=15?'🟢':c.accuracy<=30?'🟠':'🔴')+' ±'+Math.round(c.accuracy)+' m';
-  if(!running||c.accuracy>30)return;
+  const nowR=Date.now(),gap=lastRecv?((nowR-lastRecv)/1000).toFixed(1)+' s':'';
+  lastRecv=nowR;
+  $('gps').textContent='GPS : '+(c.accuracy<=15?'🟢':c.accuracy<=40?'🟠':'🔴')+' ±'+Math.round(c.accuracy)+' m'+(gap?' · '+gap:'');
+  if(!running||c.accuracy>40)return;
+  if(!last&&c.speed!=null&&!isNaN(c.speed))curV=c.speed;
   lastFix=Date.now();
   if(last){
     const dt=(t-last.t)/1000;
@@ -177,9 +185,9 @@ $('rst').onclick=()=>{
 
 setInterval(()=>{
   if(running){const n=Date.now();S.elapsed+=(n-lastTick)/1000;lastTick=n;
-    if(Math.floor(S.elapsed)%10===0)save();}
+    if(n-lastSave>10000){save();lastSave=n;}}
   render();
-},1000);
+},250);
 
 if(!window.isSecureContext)enableGps();
 if(S.elapsed>0||S.dist>0)$('go').textContent='▶ Reprendre';
