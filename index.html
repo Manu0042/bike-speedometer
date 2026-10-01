@@ -43,13 +43,22 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 #cur.stale{opacity:.45}
 #ver{font-size:.6rem;color:var(--mut);text-align:center;letter-spacing:.12em;opacity:.8;padding:2px 0 6px}
 #ver.new{color:var(--or);opacity:1;cursor:pointer;font-weight:700}
+#turn{display:none;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;color:var(--hi)}
+#tG{font-size:3.2rem;line-height:1;text-shadow:0 0 14px rgba(80,210,140,.5)}
+#tD{font-size:2rem;font-weight:800;display:block;font-variant-numeric:tabular-nums;text-align:left}
+#tT{font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);display:block;margin-top:2px;text-align:left;max-width:200px}
+#turn.off{color:#d98a55}
+.gpxrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gpxrow button{padding:12px;font-size:.7rem;background:rgba(0,0,0,.7);color:var(--hi);border:1px solid var(--line)}
+#gpxInfo{font-size:.62rem;color:var(--mut);text-align:center;letter-spacing:.08em;min-height:1em}
+#gpxDel{color:var(--or);margin-left:8px;cursor:pointer;text-decoration:underline}
 #msg{font-size:.65rem;color:var(--mut);text-align:center;min-height:1em;letter-spacing:.05em}
 </style>
 </head>
 <body>
 <h1><span id="gps">GPS : inactif</span></h1>
 <button id="gpsBtn">Activer le GPS</button>
-<div class="hero"><div class="v" id="cur">0.0</div><div class="lbl">km/h · vitesse actuelle</div><div class="bar"><i id="bar"></i></div></div>
+<div class="hero"><div id="turn"><span id="tG"></span><span><b id="tD"></b><small id="tT"></small></span></div><div class="v" id="cur">0.0</div><div class="lbl">km/h · vitesse actuelle</div><div class="bar"><i id="bar"></i></div></div>
 <div class="grid">
   <div class="card"><div class="v" id="avg">0.0</div><div class="lbl">Vitesse moy. <small>km/h</small></div></div>
   <div class="card"><div class="v" id="max">0.0</div><div class="lbl">Vitesse max <small>km/h</small></div></div>
@@ -58,14 +67,17 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 </div>
 <div class="card"><div class="v" id="ela">00:00:00</div><div class="lbl">Durée totale du trajet</div></div>
 <div id="msg">Appuyez sur Démarrer et gardez l'écran allumé.</div>
+<div class="gpxrow"><button id="gpxBtn">Importer un GPX</button><button id="voiceBtn">Voix : oui</button></div>
+<input type="file" id="gpxFile" hidden>
+<div id="gpxInfo"></div>
 <div class="btns"><button id="go">▶ Démarrer</button><button id="rst">Reset</button></div>
 <div id="ver"></div>
 
 <script>
-const APP_VERSION='1.8';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
+const APP_VERSION='1.11';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
 const KEY='compteur-velo-v1';
 let S={dist:0,max:0,moving:0,elapsed:0};
-let lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
+let lastCb=0,prevAny=null,lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
 const $=id=>document.getElementById(id);
 
 try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r));}catch(e){}
@@ -78,15 +90,17 @@ const fmtFull=s=>`${pad(s/3600)}:${pad(s%3600/60)}:${pad(s%60)}`;
 function render(){
   const kmh=v=>(v*3.6).toFixed(1);
   const fixAge=(Date.now()-lastFix)/1000;
-  const lost=running&&fixAge>6;                 // signal faible : valeur grisée
-  const gone=running&&fixAge>30;                // signal perdu depuis longtemps
+  const lost=running&&fixAge>10;                // signal faible : valeur grisée
+  const gone=running&&fixAge>60;               // signal perdu depuis longtemps
   const cv=(!running||lastFix===0)?0:(gone?0:curV*3.6);
   $('cur').textContent=gone?'--':cv.toFixed(1);
   $('cur').classList.toggle('stale',lost&&!gone);
   $('bar').style.width=Math.min(100,cv/50*100)+'%';
   // entre deux positions GPS, on prolonge le calcul avec la vitesse actuelle
+  if(running&&lastCb){const a=(Date.now()-lastCb)/1000;
+    if(a>4)$('gps').textContent='GPS : '+(a>15?'🔴':'🟠')+' dernier signal il y a '+Math.round(a)+' s';}
   const age=(Date.now()-lastFix)/1000;
-  const live=running&&curV*3.6>=2&&age>0&&age<=3;
+  const live=running&&curV*3.6>=2&&age>0&&age<=6;
   const dT=live?age:0,dD=live?curV*age:0;
   const mv=S.moving+dT,ds=S.dist+dD;
   $('avg').textContent=mv>0?kmh(ds/mv):'0.0';
@@ -105,18 +119,25 @@ function haversine(a,b){
 
 function onPos(p){
   const c=p.coords,t=p.timestamp;
+  lastCb=Date.now();
   $('gpsBtn').style.display='none';
   const nowR=Date.now(),gap=lastRecv?((nowR-lastRecv)/1000).toFixed(1)+' s':'';
   lastRecv=nowR;
   $('gps').textContent='GPS : '+(c.accuracy<=15?'🟢':c.accuracy<=40?'🟠':'🔴')+' ±'+Math.round(c.accuracy)+' m'+(gap?' · '+gap:'');
   if(!running)return;
-  const sp=(c.speed!=null&&!isNaN(c.speed))?c.speed:null;
+  let sp=(c.speed!=null&&!isNaN(c.speed))?c.speed:null;
+  if(sp===null&&prevAny&&c.accuracy<=60){          // vitesse non fournie : on la déduit du déplacement
+    const dt2=(t-prevAny.t)/1000;
+    if(dt2>0.5&&dt2<=15)sp=haversine(prevAny.c,c)/dt2;
+  }
+  prevAny={c:{latitude:c.latitude,longitude:c.longitude},t};
   if(c.accuracy>40){                            // trop imprécis pour la distance : on garde seulement la vitesse
     if(sp!==null&&c.accuracy<=150){curV=sp>=0.55?sp:0;lastFix=Date.now();render();}
     return;
   }
   if(!last&&sp!==null)curV=sp;
   lastFix=Date.now();
+  navUpdate(c.latitude,c.longitude);
   if(last){
     const dt=(t-last.t)/1000;
     if(dt>0){
@@ -177,9 +198,10 @@ function onWatchErr(e){
   setTimeout(()=>{if(running)startWatch();},1000);
 }
 function start(){
+  unlockVoice();
   if(!navigator.geolocation){$('msg').textContent='GPS non supporté.';return;}
   running=true;last=null;lastTick=Date.now();
-  lastRecv=Date.now();lastFix=Date.now();
+  lastRecv=Date.now();lastFix=Date.now();lastCb=Date.now();prevAny=null;
   startWatch();
   lockScreen();
   $('go').textContent='⏸ Pause';$('go').classList.add('on');
@@ -195,28 +217,165 @@ function pause(){
 $('go').onclick=()=>running?pause():start();
 
 $('rst').onclick=()=>{
-  if(!rstTimer){
-    $('rst').textContent='Confirmer ?';
-    rstTimer=setTimeout(()=>{rstTimer=null;$('rst').textContent='Reset';},3000);
-    return;
-  }
-  clearTimeout(rstTimer);rstTimer=null;$('rst').textContent='Reset';
   if(running)pause();
   S={dist:0,max:0,moving:0,elapsed:0};curV=0;last=null;save();
   $('go').textContent='▶ Démarrer';
-  $('msg').textContent='Nouveau trajet prêt.';render();
+  $('msg').textContent='Nouveau trajet prêt.';render();navReset();
 };
 
 setInterval(()=>{
   if(running){const n=Date.now();S.elapsed+=(n-lastTick)/1000;lastTick=n;
     if(n-lastSave>10000){save();lastSave=n;}}
-  if(running&&Date.now()-lastRecv>15000){lastRecv=Date.now();startWatch();}
+  if(running&&Date.now()-lastRecv>30000){lastRecv=Date.now();startWatch();}
   render();
 },250);
 
 if(!window.isSecureContext)enableGps();
 if(S.elapsed>0||S.dist>0)$('go').textContent='▶ Reprendre';
 render();
+
+// ===== Guidage GPX : construction de la trace et détection des virages =====
+const STEP=10;
+function buildTrack(name,raw){
+  const lat0=raw[0][0],lon0=raw[0][1],kx=111320*Math.cos(lat0*Math.PI/180);
+  const xy=raw.map(p=>[(p[1]-lon0)*kx,(p[0]-lat0)*110540]);
+  const P=[xy[0]];let carry=0;
+  for(let i=1;i<xy.length;i++){
+    let x0=xy[i-1][0],y0=xy[i-1][1];const x1=xy[i][0],y1=xy[i][1];
+    let seg=Math.hypot(x1-x0,y1-y0);
+    while(seg>0&&carry+seg>=STEP){
+      const f=(STEP-carry)/seg;x0+=(x1-x0)*f;y0+=(y1-y0)*f;
+      P.push([x0,y0]);seg=Math.hypot(x1-x0,y1-y0);carry=0;
+    }
+    carry+=seg;
+  }
+  P.push(xy[xy.length-1]);
+  const n=P.length;
+  const brg=(a,b)=>Math.atan2(b[0]-a[0],b[1]-a[1])*180/Math.PI;
+  const dif=(a,b)=>{let d=b-a;while(d>180)d-=360;while(d<-180)d+=360;return d;};
+  const ld=new Array(n).fill(0),idx=[],turns=[];
+  for(let k=2;k<n-2;k++){ld[k]=dif(brg(P[k-2],P[k]),brg(P[k],P[k+2]));if(Math.abs(ld[k])>=25)idx.push(k);}
+  let g=0;
+  while(g<idx.length){
+    let h=g;while(h+1<idx.length&&idx[h+1]-idx[h]<=3)h++;
+    const a=idx[g],b=idx[h],a0=Math.max(0,a-5),b1=Math.min(n-1,b+5);
+    const mag=dif(brg(P[a0],P[a-1]),brg(P[b+1],P[b1]));
+    let kk=a;for(let i=a;i<=b;i++)if(Math.abs(ld[i])>Math.abs(ld[kk]))kk=i;
+    if(Math.abs(mag)>=40)turns.push({k:kk,ang:mag,a1:false,a2:false});
+    g=h+1;
+  }
+  return{name,raw,lat0,lon0,kx,P,turns,idx:-1,off:false,done:false};
+}
+function turnInfo(a){
+  const d=a>0?"droite":"gauche",s=Math.abs(a);
+  if(s>=150)return{g:a>0?"↷":"↶",t:"faites demi-tour"};
+  if(s>=110)return{g:a>0?"↱":"↰",t:"tournez franchement à "+d};
+  if(s>=65)return{g:a>0?"↱":"↰",t:"tournez à "+d};
+  return{g:a>0?"↗":"↖",t:"tournez légèrement à "+d};
+}
+
+// ===== Navigation : suivi de la trace, affichage du prochain virage, annonces vocales =====
+const TKEY='compteur-velo-track',VKEY='compteur-velo-voice';
+let TR=null,voiceOn=true,offSince=0;
+try{voiceOn=localStorage.getItem(VKEY)!=='0';}catch(e){}
+const note=t=>{$('msg').textContent=t;};
+const fmtD=d=>d>=1000?(d/1000).toFixed(1)+" km":(d<50?Math.round(d/5)*5:Math.round(d/10)*10)+" m";
+function unlockVoice(){try{if('speechSynthesis' in window){const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u);}}catch(e){}}
+function say(txt){
+  if(!voiceOn||!('speechSynthesis' in window))return;
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=1.05;speechSynthesis.speak(u);}catch(e){}
+}
+function showTurn(g,d,t,off){
+  const b=$('turn');b.style.display='flex';b.classList.toggle('off',!!off);
+  $('tG').textContent=g;$('tD').textContent=d;$('tT').textContent=t;
+}
+function setInfo(txt){
+  const i=$('gpxInfo');i.textContent=txt+' ';
+  if(TR){const x=document.createElement('span');x.id='gpxDel';x.textContent='Retirer';x.onclick=removeTrack;i.appendChild(x);}
+}
+function navReset(){
+  if(!TR)return;
+  TR.idx=-1;TR.off=false;TR.done=false;offSince=0;
+  TR.turns.forEach(t=>{t.a1=false;t.a2=false;});
+  $('turn').style.display='none';trackInfo();
+}
+function trackInfo(){
+  if(!TR)return setInfo("");
+  const L=(TR.P.length-1)*STEP;
+  setInfo(TR.name+" · "+(L/1000).toFixed(1)+" km · "+TR.turns.length+" virages");
+}
+function navUpdate(lat,lon){
+  if(!TR)return;
+  const x=(lon-TR.lon0)*TR.kx,y=(lat-TR.lat0)*110540,P=TR.P,n=P.length;
+  const d2=i=>(P[i][0]-x)**2+(P[i][1]-y)**2;
+  const lo=TR.idx<0?0:Math.max(0,TR.idx-30),hi=TR.idx<0?n-1:Math.min(n-1,TR.idx+150);
+  let bi=lo,bd=d2(lo);
+  for(let i=lo+1;i<=hi;i++){const d=d2(i);if(d<bd){bd=d;bi=i;}}
+  let dist=Math.sqrt(bd);
+  if(dist>60&&TR.idx>=0){            // hors parcours : on cherche si on a rejoint la trace ailleurs
+    let gi=0,gd=d2(0);for(let i=1;i<n;i++){const d=d2(i);if(d<gd){gd=d;gi=i;}}
+    if(Math.sqrt(gd)<40){bi=gi;dist=Math.sqrt(gd);}
+  }
+  const now=Date.now();
+  if(dist>50){
+    if(!offSince)offSince=now;
+    if(!TR.off&&now-offSince>5000){TR.off=true;say("Vous êtes hors parcours");}
+    showTurn("!",fmtD(dist),"Hors parcours",true);
+    return;
+  }
+  offSince=0;
+  if(TR.off){TR.off=false;say("De retour sur le parcours");}
+  TR.idx=bi;
+  const t=TR.turns.find(t=>t.k>bi),remaining=(n-1-bi)*STEP;
+  if(!t){
+    showTurn("⚑",fmtD(remaining),"Arrivée");
+    if(remaining<=25&&!TR.done){TR.done=true;say("Vous êtes arrivé");}
+  }else{
+    const d=(t.k-bi)*STEP,info=turnInfo(t.ang);
+    showTurn(info.g,fmtD(d),info.t);
+    const far=Math.min(300,Math.max(120,Math.round(curV*12/10)*10)),near=30;
+    const cap=info.t.charAt(0).toUpperCase()+info.t.slice(1);
+    if(!t.a2&&d<=near){t.a1=true;t.a2=true;say(cap);}
+    else if(!t.a1&&d<=far&&d>near+10){t.a1=true;say("Dans "+Math.round(d/10)*10+" mètres, "+info.t);}
+  }
+  setInfo(TR.name+" · "+fmtD(remaining)+" restants · "+Math.round(bi/(n-1)*100)+" %");
+}
+function initTrack(name,raw,fresh){
+  TR=buildTrack(name,raw);trackInfo();
+  $('gpxBtn').textContent="Changer de trace";
+  if(fresh)note("Trace chargée : "+((TR.P.length-1)*STEP/1000).toFixed(1)+" km, "+TR.turns.length+" virages détectés.");
+}
+function removeTrack(){
+  TR=null;try{localStorage.removeItem(TKEY);}catch(e){}
+  $('turn').style.display='none';$('gpxBtn').textContent="Importer un GPX";setInfo("");note("Trace retirée.");
+}
+function loadGpx(txt,fname){
+  const doc=new DOMParser().parseFromString(txt,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length){note("Fichier GPX invalide.");return;}
+  let pts=[...doc.getElementsByTagName('trkpt')];
+  if(pts.length<2)pts=[...doc.getElementsByTagName('rtept')];
+  const raw=pts.map(p=>[+p.getAttribute('lat'),+p.getAttribute('lon')]).filter(p=>isFinite(p[0])&&isFinite(p[1]));
+  if(raw.length<2){note("Aucune trace trouvée dans ce fichier.");return;}
+  const nm=doc.getElementsByTagName('name')[0];
+  const name=((nm&&nm.textContent.trim())||fname||"Trace").slice(0,40);
+  const r5=raw.map(p=>[Math.round(p[0]*1e5)/1e5,Math.round(p[1]*1e5)/1e5]);
+  initTrack(name,r5,true);
+  try{localStorage.setItem(TKEY,JSON.stringify({name,raw:r5}));}catch(e){note("Trace chargée (trop volumineuse pour être mémorisée).");}
+}
+$('gpxBtn').onclick=()=>{unlockVoice();$('gpxFile').click();};
+$('gpxFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  f.text().then(t=>loadGpx(t,f.name.replace(/\.gpx$/i,""))).catch(()=>note("Lecture du fichier impossible."));
+  e.target.value='';
+};
+function paintVoice(){$('voiceBtn').textContent="Voix : "+(voiceOn?"oui":"non");}
+$('voiceBtn').onclick=()=>{
+  voiceOn=!voiceOn;paintVoice();
+  try{localStorage.setItem(VKEY,voiceOn?'1':'0');}catch(e){}
+  if(voiceOn){unlockVoice();say("Voix activée");}else{try{speechSynthesis.cancel();}catch(e){}}
+};
+paintVoice();
+try{const r=JSON.parse(localStorage.getItem(TKEY));if(r&&r.raw&&r.raw.length>1)initTrack(r.name,r.raw,false);}catch(e){}
 
 // Version affichée + détection d'une version plus récente en ligne
 $('ver').textContent='Version '+APP_VERSION;
