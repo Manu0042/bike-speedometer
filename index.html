@@ -22,8 +22,8 @@ body{margin:0;color:var(--fg);font-family:Orbitron,"Segoe UI",system-ui,sans-ser
 background-color:#131313;background-size:20px 20px;
 background-image:linear-gradient(27deg,#151515 5px,transparent 5px),linear-gradient(207deg,#151515 5px,transparent 5px),linear-gradient(27deg,#222 5px,transparent 5px),linear-gradient(207deg,#222 5px,transparent 5px),linear-gradient(90deg,#1b1b1b 10px,transparent 10px),linear-gradient(#1d1d1d 25%,#1a1a1a 25%,#1a1a1a 50%,transparent 50%,transparent 75%,#242424 75%,#242424);
 background-position:0 5px,10px 0,0 10px,10px 5px,0 0,0 0;background-attachment:fixed}
-h1{font-size:.85rem;margin:0;color:var(--hi);font-weight:700;letter-spacing:.15em;display:flex;justify-content:space-between;align-items:center;text-transform:uppercase}
-#gps{font-size:.65rem;color:var(--mut);letter-spacing:.05em}
+h1{font-size:.85rem;margin:0;color:var(--hi);font-weight:700;letter-spacing:.15em;display:flex;justify-content:center;align-items:center;text-transform:uppercase}
+#gps{font-size:.7rem;text-align:center;color:var(--mut);letter-spacing:.05em}
 .hero,.card{background:radial-gradient(120% 90% at 100% 0%,rgba(160,104,47,.16),transparent 55%),linear-gradient(160deg,rgba(0,0,0,.78),rgba(8,12,10,.92));border:1px solid var(--line);border-radius:18px;box-shadow:inset 0 0 18px rgba(60,190,120,.08),0 6px 20px rgba(0,0,0,.6)}
 .hero{padding:22px 16px 16px;text-align:center;border-color:rgba(95,200,150,.6)}
 .hero .v{font-size:5.4rem;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;color:var(--hi);text-shadow:0 0 18px rgba(80,210,140,.45)}
@@ -47,8 +47,8 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 </style>
 </head>
 <body>
-<h1><span>🚴 Compteur Vélo</span><span id="gps">GPS : inactif</span></h1>
-<button id="gpsBtn">📍 Activer le GPS</button>
+<h1><span id="gps">GPS : inactif</span></h1>
+<button id="gpsBtn">Activer le GPS</button>
 <div class="hero"><div class="v" id="cur">0.0</div><div class="lbl">km/h · vitesse actuelle</div><div class="bar"><i id="bar"></i></div></div>
 <div class="grid">
   <div class="card"><div class="v" id="avg">0.0</div><div class="lbl">Vitesse moy. <small>km/h</small></div></div>
@@ -62,7 +62,7 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 <div id="ver"></div>
 
 <script>
-const APP_VERSION='1.6';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
+const APP_VERSION='1.8';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
 const KEY='compteur-velo-v1';
 let S={dist:0,max:0,moving:0,elapsed:0};
 let lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
@@ -137,7 +137,7 @@ function onErr(e){
   $('gpsBtn').style.display='block';
   $('gps').textContent='GPS : 🔴 désactivé';
   $('msg').textContent=e.code===1
-   ?'⚠️ Localisation refusée. Autorisez-la dans les réglages du navigateur (Firefox/Chrome : cadenas › Autorisations › Localisation ; Safari : Réglages › Confidentialité › Service de localisation). Si aucune demande ne s\'affiche, la page est probablement bloquée car intégrée : ouvrez-la depuis sa propre adresse web., puis appuyez sur « Activer le GPS ».'
+   ?'⚠️ Localisation refusée. Autorisez-la dans les réglages du navigateur (Firefox/Chrome : cadenas › Autorisations › Localisation ; Safari : Réglages › Confidentialité › Service de localisation). Si aucune demande ne s\'affiche, la page est probablement bloquée car intégrée : ouvrez-la depuis sa propre adresse web, puis appuyez sur « Activer le GPS ».'
    :e.code===2?'⚠️ Position indisponible : sortez à l\'extérieur ou activez la localisation du téléphone.'
    :'⚠️ Délai dépassé, réessayez.';
 }
