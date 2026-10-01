@@ -1,6 +1,6 @@
 // Service worker : fonctionnement hors-ligne de l'application
 // Incrémentez CACHE à chaque modification des fichiers pour forcer la mise à jour.
-const CACHE = 'bike-speedometer-v4';
+const CACHE = 'bike-speedometer-v6';
 const SHELL = [
   './',
   './index.html',
@@ -28,6 +28,7 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  if (url.searchParams.has('_')) return;   // vérification de version : toujours via le réseau
 
   // Polices Google : on sert le cache et on le rafraîchit en arrière-plan
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {

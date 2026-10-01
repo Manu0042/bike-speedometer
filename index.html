@@ -40,6 +40,9 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 #go.on{background:linear-gradient(180deg,#c98a4b,#7d4f24);color:#fff}
 #rst{background:rgba(0,0,0,.7);color:#d98a55;border:1px solid #d98a55}
 #gpsBtn{display:block;background:rgba(0,0,0,.75);color:var(--hi);border:1px solid var(--hi);padding:14px;font-size:.8rem}
+#cur.stale{opacity:.45}
+#ver{font-size:.6rem;color:var(--mut);text-align:center;letter-spacing:.12em;opacity:.8;padding:2px 0 6px}
+#ver.new{color:var(--or);opacity:1;cursor:pointer;font-weight:700}
 #msg{font-size:.65rem;color:var(--mut);text-align:center;min-height:1em;letter-spacing:.05em}
 </style>
 </head>
@@ -56,8 +59,10 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 <div class="card"><div class="v" id="ela">00:00:00</div><div class="lbl">Durée totale du trajet</div></div>
 <div id="msg">Appuyez sur Démarrer et gardez l'écran allumé.</div>
 <div class="btns"><button id="go">▶ Démarrer</button><button id="rst">Reset</button></div>
+<div id="ver"></div>
 
 <script>
+const APP_VERSION='1.6';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
 const KEY='compteur-velo-v1';
 let S={dist:0,max:0,moving:0,elapsed:0};
 let lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
@@ -72,8 +77,12 @@ const fmtFull=s=>`${pad(s/3600)}:${pad(s%3600/60)}:${pad(s%60)}`;
 
 function render(){
   const kmh=v=>(v*3.6).toFixed(1);
-  const cv=Date.now()-lastFix>6000?0:curV*3.6;
-  $('cur').textContent=cv.toFixed(1);
+  const fixAge=(Date.now()-lastFix)/1000;
+  const lost=running&&fixAge>6;                 // signal faible : valeur grisée
+  const gone=running&&fixAge>30;                // signal perdu depuis longtemps
+  const cv=(!running||lastFix===0)?0:(gone?0:curV*3.6);
+  $('cur').textContent=gone?'--':cv.toFixed(1);
+  $('cur').classList.toggle('stale',lost&&!gone);
   $('bar').style.width=Math.min(100,cv/50*100)+'%';
   // entre deux positions GPS, on prolonge le calcul avec la vitesse actuelle
   const age=(Date.now()-lastFix)/1000;
@@ -100,8 +109,13 @@ function onPos(p){
   const nowR=Date.now(),gap=lastRecv?((nowR-lastRecv)/1000).toFixed(1)+' s':'';
   lastRecv=nowR;
   $('gps').textContent='GPS : '+(c.accuracy<=15?'🟢':c.accuracy<=40?'🟠':'🔴')+' ±'+Math.round(c.accuracy)+' m'+(gap?' · '+gap:'');
-  if(!running||c.accuracy>40)return;
-  if(!last&&c.speed!=null&&!isNaN(c.speed))curV=c.speed;
+  if(!running)return;
+  const sp=(c.speed!=null&&!isNaN(c.speed))?c.speed:null;
+  if(c.accuracy>40){                            // trop imprécis pour la distance : on garde seulement la vitesse
+    if(sp!==null&&c.accuracy<=150){curV=sp>=0.55?sp:0;lastFix=Date.now();render();}
+    return;
+  }
+  if(!last&&sp!==null)curV=sp;
   lastFix=Date.now();
   if(last){
     const dt=(t-last.t)/1000;
@@ -153,10 +167,20 @@ async function lockScreen(){try{if(navigator.wakeLock)wake=await navigator.wakeL
 function unlockScreen(){try{wake&&wake.release();}catch(e){}wake=null;}
 document.addEventListener('visibilitychange',()=>{if(running&&document.visibilityState==='visible')lockScreen();});
 
+function startWatch(){
+  if(watchId!=null)navigator.geolocation.clearWatch(watchId);
+  watchId=navigator.geolocation.watchPosition(onPos,onWatchErr,{enableHighAccuracy:true,maximumAge:0,timeout:60000});
+}
+function onWatchErr(e){
+  if(e.code===1){onErr(e);return;}              // refus : vrai problème
+  $('gps').textContent='GPS : 🟠 signal faible…';  // coupure passagère : on relance sans rien bloquer
+  setTimeout(()=>{if(running)startWatch();},1000);
+}
 function start(){
   if(!navigator.geolocation){$('msg').textContent='GPS non supporté.';return;}
   running=true;last=null;lastTick=Date.now();
-  watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+  lastRecv=Date.now();lastFix=Date.now();
+  startWatch();
   lockScreen();
   $('go').textContent='⏸ Pause';$('go').classList.add('on');
   $('msg').textContent='Enregistrement en cours… gardez l\'écran allumé.';
@@ -186,12 +210,32 @@ $('rst').onclick=()=>{
 setInterval(()=>{
   if(running){const n=Date.now();S.elapsed+=(n-lastTick)/1000;lastTick=n;
     if(n-lastSave>10000){save();lastSave=n;}}
+  if(running&&Date.now()-lastRecv>15000){lastRecv=Date.now();startWatch();}
   render();
 },250);
 
 if(!window.isSecureContext)enableGps();
 if(S.elapsed>0||S.dist>0)$('go').textContent='▶ Reprendre';
 render();
+
+// Version affichée + détection d'une version plus récente en ligne
+$('ver').textContent='Version '+APP_VERSION;
+function checkUpdate(){
+  if(!navigator.onLine)return;
+  fetch('index.html?_='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{
+    const m=t.match(/APP_VERSION\s*=\s*'([^']+)'/);
+    if(m&&m[1]!==APP_VERSION){
+      const v=$('ver');v.classList.add('new');
+      v.textContent='⬆ Version '+m[1]+' disponible : touchez pour mettre à jour';
+      v.onclick=()=>{
+        const go=()=>setTimeout(()=>location.reload(),1500);
+        if(navigator.serviceWorker)navigator.serviceWorker.getRegistration().then(r=>r&&r.update()).then(go,go);else location.reload();
+      };
+    }
+  }).catch(()=>{});
+}
+checkUpdate();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')checkUpdate();});
 
 if('serviceWorker' in navigator&&window.isSecureContext){
   window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
