@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>Compteur Vélo</title>
+<title>Bike Speedometer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#111111">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Vélo">
+<meta name="apple-mobile-web-app-title" content="Bike Speedometer">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap">
 <style>
 :root{--fg:#4fb883;--hi:#8fe0b2;--or:#c98a4b;--mut:#7d9a8a;--line:rgba(79,184,131,.35);
@@ -52,10 +52,13 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 .gpxrow button{padding:12px;font-size:.7rem;background:rgba(0,0,0,.7);color:var(--hi);border:1px solid var(--line)}
 #gpxInfo{font-size:.62rem;color:var(--mut);text-align:center;letter-spacing:.08em;min-height:1em}
 #gpxDel{color:var(--or);margin-left:8px;cursor:pointer;text-decoration:underline}
+#blk{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:99}
+#dimBtn{grid-column:1/-1}
 #msg{font-size:.65rem;color:var(--mut);text-align:center;min-height:1em;letter-spacing:.05em}
 </style>
 </head>
 <body>
+<div id="blk"></div>
 <h1><span id="gps">GPS : inactif</span></h1>
 <button id="gpsBtn">Activer le GPS</button>
 <div class="hero"><div id="turn"><span id="tG"></span><span><b id="tD"></b><small id="tT"></small></span></div><div class="v" id="cur">0.0</div><div class="lbl">km/h · vitesse actuelle</div><div class="bar"><i id="bar"></i></div></div>
@@ -67,17 +70,17 @@ button{font:inherit;font-weight:700;font-size:.95rem;letter-spacing:.1em;text-tr
 </div>
 <div class="card"><div class="v" id="ela">00:00:00</div><div class="lbl">Durée totale du trajet</div></div>
 <div id="msg">Appuyez sur Démarrer et gardez l'écran allumé.</div>
-<div class="gpxrow"><button id="gpxBtn">Importer un GPX</button><button id="voiceBtn">Voix : oui</button></div>
+<div class="gpxrow"><button id="gpxBtn">Importer un GPX</button><button id="voiceBtn">Voix : oui</button><button id="dimBtn">Écran noir : 2 min</button></div>
 <input type="file" id="gpxFile" hidden>
 <div id="gpxInfo"></div>
 <div class="btns"><button id="go">▶ Démarrer</button><button id="rst">Reset</button></div>
 <div id="ver"></div>
 
 <script>
-const APP_VERSION='1.11';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
+const APP_VERSION='1.13';   // à incrémenter à chaque mise à jour (avec CACHE dans sw.js)
 const KEY='compteur-velo-v1';
 let S={dist:0,max:0,moving:0,elapsed:0};
-let lastCb=0,prevAny=null,lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
+let blkOn=false,navHot=false,lastActive=Date.now(),dimMin=2,lastCb=0,prevAny=null,lastRecv=0,lastSave=0,running=false,last=null,watchId=null,lastTick=0,curV=0,lastFix=0,wake=null,rstTimer=null;
 const $=id=>document.getElementById(id);
 
 try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r));}catch(e){}
@@ -198,7 +201,7 @@ function onWatchErr(e){
   setTimeout(()=>{if(running)startWatch();},1000);
 }
 function start(){
-  unlockVoice();
+  unlockVoice();lastActive=Date.now();
   if(!navigator.geolocation){$('msg').textContent='GPS non supporté.';return;}
   running=true;last=null;lastTick=Date.now();
   lastRecv=Date.now();lastFix=Date.now();lastCb=Date.now();prevAny=null;
@@ -227,6 +230,7 @@ setInterval(()=>{
   if(running){const n=Date.now();S.elapsed+=(n-lastTick)/1000;lastTick=n;
     if(n-lastSave>10000){save();lastSave=n;}}
   if(running&&Date.now()-lastRecv>30000){lastRecv=Date.now();startWatch();}
+  dimCheck();
   render();
 },250);
 
@@ -295,7 +299,7 @@ function setInfo(txt){
 }
 function navReset(){
   if(!TR)return;
-  TR.idx=-1;TR.off=false;TR.done=false;offSince=0;
+  TR.idx=-1;TR.off=false;TR.done=false;offSince=0;navHot=false;unDim();
   TR.turns.forEach(t=>{t.a1=false;t.a2=false;});
   $('turn').style.display='none';trackInfo();
 }
@@ -321,6 +325,7 @@ function navUpdate(lat,lon){
     if(!offSince)offSince=now;
     if(!TR.off&&now-offSince>5000){TR.off=true;say("Vous êtes hors parcours");}
     showTurn("!",fmtD(dist),"Hors parcours",true);
+    navHot=true;lastActive=Date.now();if(blkOn)unDim();
     return;
   }
   offSince=0;
@@ -329,17 +334,38 @@ function navUpdate(lat,lon){
   const t=TR.turns.find(t=>t.k>bi),remaining=(n-1-bi)*STEP;
   if(!t){
     showTurn("⚑",fmtD(remaining),"Arrivée");
+    navHot=remaining<400;
     if(remaining<=25&&!TR.done){TR.done=true;say("Vous êtes arrivé");}
   }else{
     const d=(t.k-bi)*STEP,info=turnInfo(t.ang);
     showTurn(info.g,fmtD(d),info.t);
     const far=Math.min(300,Math.max(120,Math.round(curV*12/10)*10)),near=30;
+    navHot=d<=Math.max(far+30,150);
     const cap=info.t.charAt(0).toUpperCase()+info.t.slice(1);
     if(!t.a2&&d<=near){t.a1=true;t.a2=true;say(cap);}
     else if(!t.a1&&d<=far&&d>near+10){t.a1=true;say("Dans "+Math.round(d/10)*10+" mètres, "+info.t);}
   }
+  if(navHot){lastActive=Date.now();if(blkOn)unDim();}
   setInfo(TR.name+" · "+fmtD(remaining)+" restants · "+Math.round(bi/(n-1)*100)+" %");
 }
+// ===== Écran noir : l'écran reste allumé (GPS et voix actifs) mais affiche du noir quand aucun virage n'est proche =====
+const DKEY='compteur-velo-dim';
+function unDim(){$('blk').style.display='none';blkOn=false;lastActive=Date.now();}
+function dimCheck(){
+  const can=running&&TR&&dimMin>0&&!navHot&&TR.idx>=0&&(Date.now()-lastFix)<20000;
+  if(!can){if(blkOn)unDim();return;}
+  if(!blkOn&&Date.now()-lastActive>=dimMin*60000){$('blk').style.display='block';blkOn=true;}
+}
+$('blk').onclick=unDim;
+function paintDim(){$('dimBtn').textContent="Écran noir : "+(dimMin?dimMin+" min":"non");}
+$('dimBtn').onclick=()=>{
+  const o=[0,1,2,5];dimMin=o[(o.indexOf(dimMin)+1)%o.length];paintDim();lastActive=Date.now();
+  try{localStorage.setItem(DKEY,String(dimMin));}catch(e){}
+  note(dimMin?"L'écran devient noir après "+dimMin+" min sans virage proche. Touchez l'écran pour le rallumer.":"Écran noir désactivé.");
+};
+try{const d=localStorage.getItem(DKEY);if(d!==null&&[0,1,2,5].includes(+d))dimMin=+d;}catch(e){}
+paintDim();
+
 function initTrack(name,raw,fresh){
   TR=buildTrack(name,raw);trackInfo();
   $('gpxBtn').textContent="Changer de trace";
